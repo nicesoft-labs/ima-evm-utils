@@ -67,8 +67,10 @@ yum -y install swtpm || true
 if [ -f /etc/centos-release ]; then
 	yum -y install epel-release
 fi
+yum -y install fsverity-utils
 yum -y install softhsm || true
 yum -y install softhsm pkcs11-provider || true
+
 # openssl-devel-engine is available on Fedora and not on CentOS, but CentOS
 # in future might split the package too.
 yum -y install openssl-devel-engine || true

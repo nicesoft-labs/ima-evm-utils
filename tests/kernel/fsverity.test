@@ -34,6 +34,7 @@
 cd "$(dirname "$0")" || exit 1
 PATH=../../src:../../fsverity-utils:/usr/sbin:$PATH
 source ../functions.sh
+source ./functions_kernel.sh
 
 # Base VERBOSE on the environment variable, if set.
 VERBOSE="${VERBOSE:-0}"
@@ -59,6 +60,10 @@ cleanup() {
 		if [ -f "$TST_IMG" ]; then
 			rm "$TST_IMG"
 		fi
+	fi
+
+	if [ -n "$g_key_path" ]; then
+		rm -f "$g_key_path"
 	fi
 }
 
@@ -180,6 +185,7 @@ unqualified_bprm_rule() {
 load_policy_rule() {
 	local test=$1
 	local rule=$2
+	local TST_POLICY_RULE="$TST_MNT/test_policy_rule.txt"
 
 	if ! get_current_uuid; then
 		echo "${RED}FAILURE:FAILED getting uuid${NORM}"
@@ -193,9 +199,23 @@ load_policy_rule() {
 	fi
 
 	echo "$test: rule: $rule fsuuid=$UUID"
-	if ! echo "$rule fsuuid=$UUID" > $IMA_POLICY_FILE; then
-		echo "${CYAN}SKIP: Loading policy rule failed, skipping test${NORM}"
+
+	if ! echo "$rule fsuuid=$UUID" > "$TST_POLICY_RULE"; then
+		echo "${CYAN}SKIP: Can't write policy rule${NORM}"
 		return "$SKIP"
+	fi
+
+	if [ $g_sign_policy_rules -eq 1 ]; then
+		[ "$VERBOSE" -ge 1 ] && echo "INFO: Signing policy rule"
+		if ! evmctl sign -o -a sha256 --imasig --key "$g_key_path" "$TST_POLICY_RULE" &> /dev/null; then
+			echo "${READ}Failed to sign IMA policy rule${NORM}"
+			return $FAIL
+		fi
+	fi
+
+	if ! echo "$TST_POLICY_RULE" > $IMA_POLICY_FILE; then
+		echo "${CYAN}SKIP: Loading policy rule failed, skipping test${NORM}"
+		return "$FAIL"
 	fi
 	return 0
 }
@@ -327,6 +347,7 @@ _init_env
 # enabled.
 if [ -e "$IMA_POLICY_FILE" ]; then
 	mode=$(stat -c "%a" $IMA_POLICY_FILE)
+
 	if [ "$mode" != "600" ]; then
 		echo "${CYAN}SKIP: IMA policy file must be read-write${NORM}"
 		exit "$SKIP"
@@ -334,6 +355,13 @@ if [ -e "$IMA_POLICY_FILE" ]; then
 else
 	echo "${CYAN}SKIP: $IMA_POLICY_FILE does not exist${NORM}"
 	exit "$SKIP"
+fi
+
+# Detect whether IMA policy rules must be signed.
+if  grep "appraise func=POLICY_CHECK" $IMA_POLICY_FILE > /dev/null; then
+	 g_sign_policy_rules=1
+else
+	 g_sign_policy_rules=0
 fi
 
 # Skip the test if fsverity is not found; using _require fails the test.
@@ -350,6 +378,25 @@ fi
 if [ "x$(id -u)" != "x0" ]; then
 	echo "${CYAN}SKIP: Must be root to execute this test${NORM}"
 	exit "$SKIP"
+fi
+
+if [ $g_sign_policy_rules -eq 1 ]; then
+	if ! g_key_path=$(mktemp); then
+		echo "${RED}Failed to create temporary file for PEM encoded private key${NORM}"
+		exit "$FAIL"
+	fi
+
+	get_private_key "$g_key_path"
+	result=$?
+	if [ $result -ne 0 ]; then
+		exit $result
+	fi
+
+	load_public_key "$g_key_path" ".ima"
+	result=$?
+	if [ $result -ne 0 ]; then
+		exit $result
+	fi
 fi
 
 create_loopback_file ext4
