@@ -3,7 +3,32 @@ name: "distros"
 on: [push, pull_request]
 
 jobs:
+
+  review:
+    name: checkpatch review
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    - name: run checkpatch
+      id: run_checkpatch
+      run: |
+        if [ ${{ github.event_name }} == 'pull_request' ]; then
+          count=$(git rev-list --count ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }} )
+          echo "checkpatch event: ${{ github.event_name }} count: $count"
+          git format-patch -$count ${{ github.event.pull_request.head.sha }} -o patches/
+        else
+          echo "checkpatch event: ${{ github.event_name }} forced: ${{ github.event.forced }}"
+          for commit in ${{ join(github.event.commits.*.id, ' ') }}; do
+              git format-patch -1 $commit -o patches/
+          done
+        fi
+        scripts/checkpatch.pl patches/*  --strict --terse  --no-tree --ignore CONST_STRUCT,VOLATILE,SPLIT_STRING,FILE_PATH_CHANGES
+
   build:
+    needs: review
     runs-on: ubuntu-latest
     outputs:
       LINUX_SHA: ${{ steps.last-commit.outputs.LINUX_SHA }}
