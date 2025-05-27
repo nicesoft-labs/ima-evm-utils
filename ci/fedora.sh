@@ -56,7 +56,9 @@ yum -y install \
 	keyutils \
 	e2fsprogs \
 	acl \
-	libcap
+	libcap \
+	policycoreutils \
+	selinux-policy-targeted
 
 yum -y install docbook5-style-xsl || true
 yum -y install swtpm || true
@@ -67,6 +69,9 @@ if [ -f /etc/centos-release ]; then
 fi
 yum -y install softhsm || true
 yum -y install softhsm pkcs11-provider || true
+# openssl-devel-engine is available on Fedora and not on CentOS, but CentOS
+# in future might split the package too.
+yum -y install openssl-devel-engine || true
 
 # haveged is available via EPEL on CentOS stream8.
 yum -y install haveged || true
