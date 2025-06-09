@@ -80,7 +80,7 @@ echo "PREFIX: '$PREFIX'"
 
 title "configure"
 ./autogen.sh
-./configure --prefix=$PREFIX $host || log_exit config.log "configure failed"
+./configure --prefix=$PREFIX $host --disable-engine || log_exit config.log "configure failed"
 
 title "make"
 make -j$(nproc)
@@ -92,6 +92,7 @@ if [ "$VARIANT" = "cross-compile" ]; then
 	exit 0
 fi
 
+openssl list -providers
 ret=0
 VERBOSE=1 make check || ret=$?
 
