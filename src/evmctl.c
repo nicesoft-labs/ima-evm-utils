@@ -1148,6 +1148,7 @@ static int cmd_import(struct command *cmd)
 		RSA_free(key);
 #else
 		log_info("Importing public RSA key is not supported\n");
+		print_usage(cmd);
 		return 1;
 #endif
 	}
@@ -2752,13 +2753,16 @@ static int cmd_ima_bootaggr(struct command *cmd)
 		}
 	} else {
 		tpm_banks = init_tpm_banks(&num_banks);
-		if (!tpm_banks)
+		if (!tpm_banks) {
+			print_usage(cmd);
 			return -1;
+		}
 
 		if (read_tpm_banks(num_banks, tpm_banks) != 0) {
 			log_info("Failed to read any TPM PCRs\n");
 			free(tpm_banks);
 
+			print_usage(cmd);
 			return -1;
 		}
 	}
