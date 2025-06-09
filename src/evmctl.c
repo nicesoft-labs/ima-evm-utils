@@ -818,7 +818,7 @@ static int cmd_sign_hash(struct command *cmd)
 				algolen = hashp - line;
 
 			if (!hashp || algolen <= 0 ||
-			    algolen >= sizeof(algo)) {
+			    algolen >= (int)sizeof(algo)) {
 				log_err("Missing/invalid fsverity hash algorithm\n");
 				continue;
 			}
@@ -871,7 +871,7 @@ static int cmd_sign_hash(struct command *cmd)
 
 		if (siglen <= 1)
 			return siglen;
-		assert(siglen < sizeof(sig));
+		assert(siglen < (int)sizeof(sig));
 
 		fwrite(line, len, 1, stdout);
 		fprintf(stdout, " ");
@@ -953,7 +953,7 @@ static int verify_evm(struct public_key_entry *public_keys, const char *file)
 	mdlen = calc_evm_hash(file, hash_algo, hash);
 	if (mdlen <= 1)
 		return mdlen;
-	assert(mdlen <= sizeof(hash));
+	assert(mdlen <= (int)sizeof(hash));
 
 	return imaevm_verify_hash(public_keys, file, hash_algo, hash,
 				  mdlen, sig, len);
@@ -1688,7 +1688,7 @@ static void ima_ng_show(struct public_key_entry *public_keys,
 	field_len = *(uint32_t *)fieldp;
 	fieldp += sizeof(field_len);
 	total_len -= sizeof(field_len);
-	if (field_len == 0 || field_len > PATH_MAX || total_len < field_len) {
+	if (field_len == 0 || field_len > PATH_MAX || total_len < (int)field_len) {
 		log_err("Template \"%s\" invalid file pathname\n", entry->name);
 		return;
 	}

@@ -805,7 +805,7 @@ int ima_verify_signature2(struct public_key_entry *public_keys, const char *file
 	hashlen = ima_calc_hash2(file, hash_algo, hash);
 	if (hashlen <= 1)
 		return hashlen;
-	assert(hashlen <= sizeof(hash));
+	assert(hashlen <= (int)sizeof(hash));
 
 	return imaevm_verify_hash(public_keys, file, hash_algo, hash, hashlen,
 				  sig, siglen);
@@ -989,7 +989,7 @@ static int read_keyid_from_cert(uint32_t *keyid_be, const char *certfile, int tr
 		log_err("read keyid: %s: SKID not found\n", certfile);
 		goto err_free;
 	}
-	if (skid_len < sizeof(*keyid_be)) {
+	if (skid_len < (int)sizeof(*keyid_be)) {
 		log_err("read keyid: %s: SKID too short (len %d)\n", certfile,
 			skid_len);
 		goto err_free;
