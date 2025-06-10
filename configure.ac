@@ -39,11 +39,17 @@ AM_CONDITIONAL([USE_IBMTSS], [test "x$ac_cv_header_ibmtss_tss_h" = "xyes"])
 
 AC_CHECK_HEADERS(sys/xattr.h, , [AC_MSG_ERROR([sys/xattr.h header not found. You need the c-library development package.])])
 AC_CHECK_HEADERS(keyutils.h, , [AC_MSG_ERROR([keyutils.h header not found. You need the libkeyutils development package.])])
+AC_CHECK_HEADERS(linux/hash_info.h)
 
+KERNEL_HEADERS_PATH=$(readlink -f /lib/modules/$(uname -r)/source)
 AC_ARG_WITH(kernel_headers, [AS_HELP_STRING([--with-kernel-headers=PATH],
 	    [specifies the Linux kernel-headers package location or kernel root directory you want to use])],
 	    [KERNEL_HEADERS="$withval"],
-	    [KERNEL_HEADERS=/lib/modules/$(uname -r)/source])
+	    [if test -e "$KERNEL_HEADER_PATH"; then
+	        KERNEL_HEADERS="$KERNEL_HEADERS_PATH"
+	     elif test "x$ac_cv_header_linux_hash_info_h" = "xyes"; then
+		KERNEL_HEADERS="/usr/include/linux"
+	     fi])
 
 AC_ARG_ENABLE([openssl_conf],
 	      [AS_HELP_STRING([--disable-openssl-conf], [disable loading of openssl config by evmctl])],
@@ -108,4 +114,5 @@ echo    "         engine: $enable_engine"
 echo    "       provider: $enable_provider"
 echo	"            doc: $have_doc"
 echo	"         pandoc: $have_pandoc"
+echo	"  kernel-headers: $ac_cv_header_linux_hash_info_h"
 echo

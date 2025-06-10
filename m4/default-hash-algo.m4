@@ -4,7 +4,11 @@ dnl
 dnl $1 - $KERNEL_HEADERS
 
 AC_DEFUN([AX_DEFAULT_HASH_ALGO], [
-	HASH_INFO_HEADER="$1/include/uapi/linux/hash_info.h"
+	if test "$1" = "/usr/include/linux"; then
+		HASH_INFO_HEADER="$1/hash_info.h"
+	else
+		HASH_INFO_HEADER="$1/include/uapi/linux/hash_info.h"
+	fi
 
 	AC_ARG_WITH([default_hash],
 		AS_HELP_STRING([--with-default-hash=ALGORITHM], [specifies the default hash algorithm to be used]),
