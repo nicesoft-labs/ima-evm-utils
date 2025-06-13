@@ -726,7 +726,11 @@ static int do_cmd(struct command *cmd, find_cb_t func)
 		}
 		err = find(path, dts, func);
 	} else {
-		err = func(path);
+		do {
+			err = func(path);
+			if (err)
+				return err;
+		} while ((path = g_argv[optind++]));
 	}
 
 	return err;
@@ -948,7 +952,7 @@ static int cmd_verify_evm(struct command *cmd)
 {
 	struct public_key_entry *public_keys = NULL;
 	char *file = g_argv[optind++];
-	int err;
+	int err, fails = 0;
 
 	if (!file) {
 		log_err("Parameters missing\n");
@@ -969,12 +973,17 @@ static int cmd_verify_evm(struct command *cmd)
 		}
 	}
 
-	err = verify_evm(public_keys, file);
-	if (!err && imaevm_params.verbose >= LOG_INFO)
-		log_info("%s: verification is OK\n", file);
+	do {
+		err = verify_evm(public_keys, file);
+		if (err)
+			fails++;
+		if (!err && imaevm_params.verbose >= LOG_INFO)
+			log_info("%s: verification is OK\n", file);
+	} while ((file = g_argv[optind++]));
 
 	imaevm_free_public_keys(public_keys);
-	return err;
+
+	return fails > 0;
 }
 
 static int verify_ima(struct public_key_entry *public_keys, const char *file)
