@@ -5,18 +5,14 @@
 #
 # Check the behavior of MMAP_CHECK and MMAP_CHECK_REQPROT
 
-# shellcheck disable=SC2034
-
 trap '_report_exit_and_cleanup _cleanup_env cleanup' SIGINT SIGTERM SIGSEGV EXIT
 
+# PATCHES is used in functions.sh
+# shellcheck disable=SC2034
 PATCHES=(
 'ima: Align ima_file_mmap() parameters with mmap_file LSM hook'
 'ima: Introduce MMAP_CHECK_REQPROT hook'
 )
-
-RET_INVALID_RULE=$((0x0001))
-RET_RULE_OVERLAP=$((0x0002))
-RET_SAME_RULE_EXISTS=$((0x0004))
 
 EVM_INIT_HMAC=$((0x0001))
 EVM_INIT_X509=$((0x0002))
@@ -25,13 +21,13 @@ EVM_INIT_X509=$((0x0002))
 VERBOSE="${VERBOSE:-0}"
 
 # Errors defined in test_mmap
+# ERR_SETUP is currently not used
+# shellcheck disable=SC2034
 ERR_SETUP=1
 ERR_TEST=2
 
 cd "$(dirname "$0")" || exit 1
-export PATH=$PWD/../src:$PWD:$PATH
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH
-. ./functions.sh
+. ./functions_kernel.sh
 _require evmctl
 
 cleanup() {
@@ -52,8 +48,8 @@ cleanup() {
 		rm -Rf "$g_mountpoint"
 	fi
 
-	if [ -n "$g_key_path_der" ]; then
-		rm -f "$g_key_path_der"
+	if [ -n "$g_key_path" ]; then
+		rm -f "$g_key_path"
 	fi
 }
 
@@ -69,45 +65,6 @@ APPRAISE_MMAP_CHECK_FOWNER=2002
 APPRAISE_MMAP_CHECK_REQPROT_FOWNER=2003
 APPRAISE_MMAP_CHECK_RULE="appraise func=MMAP_CHECK fsmagic=0xef53 fsuuid=$IMA_UUID fowner=$APPRAISE_MMAP_CHECK_FOWNER"
 APPRAISE_MMAP_CHECK_REQPROT_RULE="appraise func=MMAP_CHECK_REQPROT fsmagic=0xef53 fsuuid=$IMA_UUID fowner=$APPRAISE_MMAP_CHECK_REQPROT_FOWNER"
-
-check_load_ima_rule() {
-	local result new_policy color
-
-	echo -e "$1\n$(cat /sys/kernel/security/ima/policy)" | ima_policy_check.awk
-	result=$?
-
-	if [ $((result & RET_INVALID_RULE)) -eq $RET_INVALID_RULE ]; then
-		echo "${RED}Invalid rule${NORM}"
-		return "$HARDFAIL"
-	fi
-
-	if [ $((result & RET_RULE_OVERLAP)) -eq $RET_RULE_OVERLAP ]; then
-		color=${YELLOW}
-		if [ -n "$TST_ENV" ]; then
-			color=${RED}
-		fi
-
-		echo "${color}Possible interference with existing IMA policy rule${NORM}"
-		if [ -n "$TST_ENV" ]; then
-			return "$HARDFAIL"
-		fi
-	fi
-
-	if [ $((result & RET_SAME_RULE_EXISTS)) -eq $RET_SAME_RULE_EXISTS ]; then
-		return "$OK"
-	fi
-
-	new_policy=$(mktemp -p "$g_mountpoint")
-	echo "$1" > "$new_policy"
-	if ! echo "$new_policy" > /sys/kernel/security/ima/policy; then
-		rm -f "$new_policy"
-		echo "${RED}Failed to set IMA policy${NORM}"
-		return "$HARDFAIL"
-	fi
-	rm -f "$new_policy"
-
-	return "$OK"
-}
 
 check_mmap() {
 	local hook="$1"
@@ -139,7 +96,7 @@ check_mmap() {
 		return "$HARDFAIL"
 	fi
 
-	check_load_ima_rule "$rule"
+	check_load_ima_rule "$rule" "$g_key_path" "$g_mountpoint"
 	result=$?
 	if [ $result -ne "$OK" ]; then
 		return $result
@@ -217,7 +174,7 @@ check_deny() {
 		return "$HARDFAIL"
 	fi
 
-	check_load_ima_rule "$rule"
+	check_load_ima_rule "$rule" "$g_key_path" "$g_mountpoint"
 	result=$?
 	if [ $result -ne "$OK" ]; then
 		return $result
@@ -287,29 +244,6 @@ if ! cat /sys/kernel/security/ima/policy &> /dev/null; then
 	exit "$SKIP"
 fi
 
-if [ -n "$TST_KEY_PATH" ]; then
-	if [ "${TST_KEY_PATH:0:1}" != "/" ]; then
-		echo "${RED}Absolute path required for the signing key${NORM}"
-		exit "$FAIL"
-	fi
-
-	if [ ! -f "$TST_KEY_PATH" ]; then
-		echo "${RED}Kernel signing key not found in $TST_KEY_PATH${NORM}"
-		exit "$FAIL"
-	fi
-
-	g_key_path="$TST_KEY_PATH"
-elif [ -f "$PWD/../signing_key.pem" ]; then
-	g_key_path="$PWD/../signing_key.pem"
-elif [ -f "/lib/modules/$(uname -r)/source/certs/signing_key.pem" ]; then
-	g_key_path="/lib/modules/$(uname -r)/source/certs/signing_key.pem"
-elif [ -f "/lib/modules/$(uname -r)/build/certs/signing_key.pem" ]; then
-	g_key_path="/lib/modules/$(uname -r)/build/certs/signing_key.pem"
-else
-	echo "${CYAN}Kernel signing key not found${NORM}"
-	exit "$SKIP"
-fi
-
 evm_value=$(cat /sys/kernel/security/evm)
 if [ $((evm_value & EVM_INIT_X509)) -eq "$EVM_INIT_X509" ]; then
 	if [ $((evm_value & EVM_INIT_HMAC)) -ne "$EVM_INIT_HMAC" ]; then
@@ -318,12 +252,21 @@ if [ $((evm_value & EVM_INIT_X509)) -eq "$EVM_INIT_X509" ]; then
 	fi
 fi
 
-g_key_path_der=$(mktemp)
-
-openssl x509 -in "$g_key_path" -out "$g_key_path_der" -outform der
-if ! keyctl padd asymmetric pubkey %keyring:.ima < "$g_key_path_der" &> /dev/null; then
-	echo "${RED}Public key cannot be added to the IMA keyring${NORM}"
+if ! g_key_path=$(mktemp); then
+	echo "${RED}Failed to create temporary file for private key${NORM}"
 	exit "$FAIL"
+fi
+
+get_private_key "$g_key_path"
+result=$?
+if [ $result -ne 0 ]; then
+	exit $result
+fi
+
+load_public_key "$g_key_path" ".ima"
+result=$?
+if [ $result -ne 0 ]; then
+	exit $result
 fi
 
 g_mountpoint=$(mktemp -d)

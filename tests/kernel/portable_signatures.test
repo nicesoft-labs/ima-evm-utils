@@ -18,9 +18,8 @@ TST_EVM_CHANGE_MODE="${TST_EVM_CHANGE_MODE:-0}"
 (( EVM_SETUP_COMPLETE=0x80000000 ))
 
 cd "$(dirname "$0")" || exit "$FAIL"
-export PATH=$PWD/../src:$PWD/../mount-idmapped:$PATH
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH
-. ./functions.sh
+export PATH=$PWD/../../mount-idmapped:$PATH
+. ./functions_kernel.sh
 _require evmctl
 
 cleanup() {
@@ -42,8 +41,8 @@ cleanup() {
 		rm -f "$g_image"
 	fi
 
-	if [ -n "$key_path_der" ]; then
-		rm -f "$key_path_der"
+	if [ -n "$g_key_path" ]; then
+		rm -f "$g_key_path"
 	fi
 
 	if [ -n "$g_mountpoint" ]; then
@@ -53,16 +52,6 @@ cleanup() {
 	if [ -n "$g_mountpoint_idmapped" ]; then
 		rm -Rf "$g_mountpoint_idmapped"
 	fi
-}
-
-get_xattr() {
-	local format="hex"
-
-	if [ "$1" = "security.selinux" ]; then
-		format="text"
-	fi
-
-	getfattr -n "$1" -e $format -d "$2" 2> /dev/null | awk -F "=" '$1 == "'"$1"'" {if ("'$format'" == "hex") v=substr($2, 3); else { split($2, temp, "\""); v=temp[2] }; print v}'
 }
 
 # Use the fsuuid= IMA policy keyword to select only files created/used by the
@@ -77,26 +66,6 @@ APPRAISE_FOWNER=2002
 APPRAISE_RULE="appraise fsuuid=$IMA_UUID fowner=$APPRAISE_FOWNER"
 METADATA_CHANGE_FOWNER=3001
 METADATA_CHANGE_FOWNER_2=3002
-
-check_load_ima_rule() {
-	local rule_loaded
-	local new_policy
-
-	rule_loaded=$(grep "$1" /sys/kernel/security/ima/policy)
-	if [ -z "$rule_loaded" ]; then
-		new_policy=$(mktemp -p "$g_mountpoint")
-		echo "$1" > "$new_policy"
-		evmctl sign -o -a sha256 --imasig --key "$key_path" "$new_policy" &> /dev/null
-		if ! echo "$new_policy" > /sys/kernel/security/ima/policy; then
-			rm -f "$new_policy"
-			echo "${RED}Failed to set IMA policy${NORM}"
-			return "$FAIL"
-		fi
-		rm -f "${new_policy}"
-	fi
-
-	return "$OK"
-}
 
 # The purpose of this test is to verify that the patch 'ima: Allow imasig
 # requirement to be satisfied by EVM portable signatures' didn't break the
@@ -116,7 +85,7 @@ check_ima_sig_appraisal() {
 		return "$FAIL"
 	fi
 
-	if ! evmctl ima_sign -a sha256 --key "$key_path" test-file &> /dev/null; then
+	if ! evmctl ima_sign -a sha256 --key "$g_key_path" test-file &> /dev/null; then
 		echo "${RED}Cannot sign test-file${NORM}"
 		return "$FAIL"
 	fi
@@ -126,7 +95,7 @@ check_ima_sig_appraisal() {
 		return "$FAIL"
 	fi
 
-	check_load_ima_rule "$APPRAISE_DIGSIG_RULE"
+	check_load_ima_rule "$APPRAISE_DIGSIG_RULE" "$g_key_path" "$g_mountpoint"
 	result=$?
 	if [ $result -ne "$OK" ]; then
 		return $result
@@ -169,7 +138,7 @@ check_ima_sig_ima_measurement_list() {
 		return "$FAIL"
 	fi
 
-	if ! evmctl ima_sign -a sha256 --imasig --key "$key_path" test-file &> /dev/null; then
+	if ! evmctl ima_sign -a sha256 --imasig --key "$g_key_path" test-file &> /dev/null; then
 		echo "${RED}Cannot sign test-file${NORM}"
 		return "$FAIL"
 	fi
@@ -179,7 +148,7 @@ check_ima_sig_ima_measurement_list() {
 		return "$FAIL"
 	fi
 
-	check_load_ima_rule "$MEASURE_RULE"
+	check_load_ima_rule "$MEASURE_RULE" "$g_key_path" "$g_mountpoint"
 	result=$?
 	if [ $result -ne "$OK" ]; then
 		return $result
@@ -263,7 +232,7 @@ check_cp_preserve_xattrs() {
 		return "$FAIL"
 	fi
 
-	if ! evmctl sign -o -a sha256 --imahash --key "$key_path" test-file &> /dev/null; then
+	if ! evmctl sign -o -a sha256 --imahash --key "$g_key_path" test-file &> /dev/null; then
 		echo "${RED}Cannot sign test-file${NORM}"
 		return "$FAIL"
 	fi
@@ -320,7 +289,7 @@ check_tar_extract_xattrs_different_owner() {
 		return "$FAIL"
 	fi
 
-	if ! evmctl sign -o -a sha256 --imahash --key "$key_path" in/test-file &> /dev/null; then
+	if ! evmctl sign -o -a sha256 --imahash --key "$g_key_path" in/test-file &> /dev/null; then
 		echo "${RED}Cannot sign test-file${NORM}"
 		return "$FAIL"
 	fi
@@ -378,7 +347,7 @@ check_tar_extract_xattrs_same_owner() {
 		return "$FAIL"
 	fi
 
-	if ! evmctl sign -o -a sha256 --imahash --key "$key_path" in/test-file &> /dev/null; then
+	if ! evmctl sign -o -a sha256 --imahash --key "$g_key_path" in/test-file &> /dev/null; then
 		echo "${RED}Cannot sign test-file${NORM}"
 		return "$FAIL"
 	fi
@@ -452,7 +421,7 @@ check_metadata_change() {
 		return "$FAIL"
 	fi
 
-	if ! evmctl sign -o -a sha256 --imahash --key "$key_path" test-file &> /dev/null; then
+	if ! evmctl sign -o -a sha256 --imahash --key "$g_key_path" test-file &> /dev/null; then
 		echo "${RED}Cannot sign test-file${NORM}"
 		return "$FAIL"
 	fi
@@ -612,7 +581,7 @@ check_evm_revalidate() {
 	# We need to defer setting the correct owner, as there could be
 	# already an IMA policy rule preventing evmctl from reading the
 	# file to calculate the digest.
-	if ! evmctl sign -o -a sha256 --imahash --uid "$APPRAISE_FOWNER" --key "$key_path" test-file &> /dev/null; then
+	if ! evmctl sign -o -a sha256 --imahash --uid "$APPRAISE_FOWNER" --key "$g_key_path" test-file &> /dev/null; then
 		echo "${RED}Cannot sign test-file${NORM}"
 		return "$FAIL"
 	fi
@@ -622,7 +591,7 @@ check_evm_revalidate() {
 		return "$FAIL"
 	fi
 
-	check_load_ima_rule "$APPRAISE_RULE"
+	check_load_ima_rule "$APPRAISE_RULE" "$g_key_path" "$g_mountpoint"
 	result=$?
 	if [ $result -ne "$OK" ]; then
 		return $result
@@ -819,7 +788,7 @@ check_evm_portable_sig_ima_appraisal() {
 	# We need to defer setting the correct owner, as there could be
 	# already an IMA policy rule preventing evmctl from reading the
 	# file to calculate the digest.
-	if ! evmctl sign -o -a sha256 --imahash --uid "$APPRAISE_DIGSIG_FOWNER" --key "$key_path" test-file &> /dev/null; then
+	if ! evmctl sign -o -a sha256 --imahash --uid "$APPRAISE_DIGSIG_FOWNER" --key "$g_key_path" test-file &> /dev/null; then
 		echo "${RED}Cannot sign test-file${NORM}"
 		return "$FAIL"
 	fi
@@ -829,7 +798,7 @@ check_evm_portable_sig_ima_appraisal() {
 		return "$FAIL"
 	fi
 
-	check_load_ima_rule "$APPRAISE_DIGSIG_RULE"
+	check_load_ima_rule "$APPRAISE_DIGSIG_RULE" "$g_key_path" "$g_mountpoint"
 	result=$?
 	if [ "$result" -ne "$OK" ]; then
 		return "$result"
@@ -931,12 +900,12 @@ check_evm_portable_sig_ima_measurement_list() {
 		return "$FAIL"
 	fi
 
-	if ! evmctl sign -o -a sha256 --imahash --key "$key_path" test-file &> /dev/null; then
+	if ! evmctl sign -o -a sha256 --imahash --key "$g_key_path" test-file &> /dev/null; then
 		echo "${RED}Cannot sign test-file${NORM}"
 		return "$FAIL"
 	fi
 
-	check_load_ima_rule "$MEASURE_RULE"
+	check_load_ima_rule "$MEASURE_RULE" "$g_key_path" "$g_mountpoint"
 	result=$?
 	if [ "$result" -ne "$OK" ]; then
 		return "$result"
@@ -996,31 +965,6 @@ if [ "$(whoami)" != "root" ]; then
 	exit "$SKIP"
 fi
 
-if [ -n "$TST_KEY_PATH" ]; then
-	if [ "${TST_KEY_PATH:0:1}" != "/" ]; then
-		echo "${RED}Absolute path required for the signing key${NORM}"
-		exit "$FAIL"
-	fi
-
-	if [ ! -f "$TST_KEY_PATH" ]; then
-		echo "${RED}Kernel signing key not found in $TST_KEY_PATH${NORM}"
-		exit "$FAIL"
-	fi
-
-	key_path="$TST_KEY_PATH"
-elif [ -f "$PWD/../signing_key.pem" ]; then
-	key_path="$PWD/../signing_key.pem"
-elif [ -f "/lib/modules/$(uname -r)/source/certs/signing_key.pem" ]; then
-	key_path="/lib/modules/$(uname -r)/source/certs/signing_key.pem"
-elif [ -f "/lib/modules/$(uname -r)/build/certs/signing_key.pem" ]; then
-	key_path="/lib/modules/$(uname -r)/build/certs/signing_key.pem"
-else
-	echo "${CYAN}Kernel signing key not found${NORM}"
-	exit "$SKIP"
-fi
-
-key_path_der=$(mktemp)
-
 if [ ! -f "/sys/kernel/security/evm" ]; then
 	echo "${CYAN}EVM support in the kernel disabled${NORM}"
 	exit "$SKIP"
@@ -1033,10 +977,21 @@ fi
 
 evm_value=$(cat /sys/kernel/security/evm)
 
-openssl x509 -in "$key_path" -out "$key_path_der" -outform der
-if ! keyctl padd asymmetric pubkey %keyring:.ima < "$key_path_der" &> /dev/null; then
-	echo "${RED}Public key cannot be added to the IMA keyring${NORM}"
+if ! g_key_path=$(mktemp); then
+	echo "${RED}Failed to create temporary file for private key${NORM}"
 	exit "$FAIL"
+fi
+
+get_private_key "$g_key_path"
+result=$?
+if [ $result -ne 0 ]; then
+	exit $result
+fi
+
+load_public_key "$g_key_path" ".ima"
+result=$?
+if [ $result -ne 0 ]; then
+	exit $result
 fi
 
 if ! dd if=/dev/zero of="$g_image" bs=1M count=20 &> /dev/null; then
@@ -1082,9 +1037,10 @@ if [ "$(echo -e "$(uname -r)\n5.12" | sort -V | head -n 1)" != "5.12" ]; then
 fi
 
 if [ $((evm_value & EVM_INIT_X509)) -ne "$EVM_INIT_X509" ] && [ "$TST_EVM_CHANGE_MODE" -eq 1 ]; then
-	if ! keyctl padd asymmetric pubkey %keyring:.evm < "$key_path_der" &> /dev/null; then
-		echo "${RED}Public key cannot be added to the EVM keyring${NORM}"
-		exit "$FAIL"
+	load_public_key "$g_key_path" ".evm"
+	result=$?
+	if [ $result -ne 0 ]; then
+		exit $result
 	fi
 
 	echo "$EVM_INIT_X509" > /sys/kernel/security/evm 2> /dev/null

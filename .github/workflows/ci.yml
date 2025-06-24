@@ -25,7 +25,7 @@ jobs:
               git format-patch -1 $commit -o patches/
           done
         fi
-        scripts/checkpatch.pl patches/*  --strict --terse  --no-tree --ignore CONST_STRUCT,VOLATILE,SPLIT_STRING,FILE_PATH_CHANGES
+        scripts/checkpatch.pl patches/*  --strict --terse  --no-tree --ignore CONST_STRUCT,VOLATILE,SPLIT_STRING,FILE_PATH_CHANGES,EXECUTE_PERMISSIONS,UNKNOWN_COMMIT_ID,BAD_SIGN_OFF
 
   build:
     needs: review
@@ -182,7 +182,7 @@ jobs:
               CC: clang
               TSS: ibmtss
               TST_ENV: um
-              TST_KERNEL: ../linux
+              TST_KERNEL: ../../linux
               TST_EVM_CHANGE_MODE: 1
 
           - container: "quay.io/centos/centos:stream9"
