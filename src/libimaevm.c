@@ -1363,9 +1363,18 @@ static int sign_hash_v2(const char *algo, const unsigned char *hash,
 	st = "EVP_get_digestbyname";
 	if (!(md = EVP_get_digestbyname(algo)))
 		goto err;
+	int pkey_id = EVP_PKEY_id(pkey);
+	log_info("sign_hash_v2: OpenSSL PKEY id: %d\n", pkey_id);
+
+	if (pkey_id == NID_id_GostR3410_2001 ||
+	    pkey_id == NID_id_GostR3410_2012_256 ||
+	    pkey_id == NID_id_GostR3410_2012_512) {
+		log_info("sign_hash_v2: GOST key detected, skipping EVP_PKEY_CTX_set_signature_md\n");
+	} else {
 	st = "EVP_PKEY_CTX_set_signature_md";
 	if (!EVP_PKEY_CTX_set_signature_md(ctx, md))
 		goto err;
+	}
 	st = "EVP_PKEY_sign";
 	sigsize = MAX_SIGNATURE_SIZE - sizeof(struct signature_v2_hdr) - 1;
 	if (!EVP_PKEY_sign(ctx, hdr->sig, &sigsize, hash, size))
